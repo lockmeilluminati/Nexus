@@ -1,0 +1,22 @@
+NEXUS_PROJECT_V1
+ASSET_COUNT 2
+ASSET_START
+NAME abandoned mansion bedroom(1)
+PATH Envs/abandoned_mansion_bedroom(1)/abandoned_mansion_bedroom(1).glb
+IS_ENV 1
+POS -3.61144 0 -4.14314
+ROT 0 0 0
+SCALE 1
+TRACK_START 0
+TRACK_END 300
+ASSET_END
+ASSET_START
+NAME animated injured zombie crawling loop
+PATH Chars/animated_injured_zombie_crawling_loop/animated_injured_zombie_crawling_loop.glb
+IS_ENV 0
+POS -2.12223 0 1.84107
+ROT 0 0 0
+SCALE 1
+TRACK_START 0
+TRACK_END 617
+ASSET_END

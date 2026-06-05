@@ -1,39 +1,96 @@
 #include "nexus_texture_extractor.h"
-#include <direct.h>    
-#include <cstdlib>     
-#include <fstream>     
+#include "raylib.h"
+#include <filesystem>
+#include <cstdlib>
+#include <algorithm>
+#include <string>
+
+namespace fs = std::filesystem;
 
 std::string IngestAsset(const std::string& sourceFilePath, const std::string& category) {
-    // 1. Ensure master category folder exists ("Envs" or "Chars")
-    _mkdir(category.c_str());
+    fs::create_directories(category);
 
-    std::string fileName = sourceFilePath.substr(sourceFilePath.find_last_of("/\\") + 1);
-    std::string rawName = fileName.substr(0, fileName.find_last_of('.'));
-    
-    // 2. Create the specific asset folder
-    std::string localDir = category + "/" + rawName;
-    _mkdir(localDir.c_str());
+    fs::path sourcePath(sourceFilePath);
+    std::string fileName = sourcePath.filename().string();
+    std::string ext = sourcePath.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-    // 3. SECURE THE GLB: Copy the original file into our new folder
-    std::string localGlbPath = localDir + "/" + fileName;
-    if (!FileExists(localGlbPath.c_str())) {
-        std::ifstream src(sourceFilePath, std::ios::binary);
-        std::ofstream dst(localGlbPath, std::ios::binary);
-        if (src && dst) dst << src.rdbuf();
-    }
-
-    // 4. TRIGGER EXTRACTION: 
-    // FIXED: Removed the .py extension from the glbdump target
-    std::string command = "cd \"" + localDir + "\" && py \"../../tools/glbdump/glbdump\" -i \"" + fileName + "\"";
-    
-    int result = std::system(command.c_str());
-    
-    if (result == 0) {
-        TraceLog(LOG_INFO, TextFormat("PIPELINE: Textures ripped and archived in %s", localDir.c_str()));
+    std::string rawName;
+    if (ext == ".gltf") {
+        rawName = sourcePath.parent_path().filename().string();
     } else {
-        TraceLog(LOG_ERROR, "PIPELINE: glbdump failed to extract images.");
+        rawName = sourcePath.stem().string();
     }
 
-    // 5. Return the path to the copied .glb 
-    return localGlbPath;
+    std::string localDir = category + "/" + rawName;
+    fs::create_directories(localDir);
+    
+    fs::path localAssetPath = fs::path(localDir) / fileName;
+    std::string localAssetPathStr = localAssetPath.string();
+
+    // Prevent hard crashes if the user selects a file ALREADY in the target directory
+    bool isSameFile = false;
+    if (fs::exists(localAssetPath) && fs::exists(sourcePath)) {
+        if (fs::equivalent(sourcePath, localAssetPath)) {
+            isSameFile = true;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // .gltf
+    // ---------------------------------------------------------------
+    if (ext == ".gltf") {
+        fs::path sourceDir = sourcePath.parent_path();
+        fs::path targetDir = fs::path(localDir);
+        
+        bool isSameDir = false;
+        if (fs::exists(targetDir) && fs::exists(sourceDir)) {
+            if (fs::equivalent(sourceDir, targetDir)) {
+                isSameDir = true;
+            }
+        }
+
+        if (!isSameDir) {
+            try {
+                fs::copy(sourceDir, targetDir,
+                         fs::copy_options::overwrite_existing | fs::copy_options::recursive);
+                TraceLog(LOG_INFO, TextFormat("PIPELINE: glTF directory archived to %s", localDir.c_str()));
+            } catch (const fs::filesystem_error& e) {
+                TraceLog(LOG_ERROR, TextFormat("PIPELINE: Failed to copy glTF: %s", e.what()));
+            }
+        } else {
+            TraceLog(LOG_INFO, "PIPELINE: Source and target are the same directory. Skipping copy.");
+        }
+        return localAssetPathStr;
+    }
+
+    // ---------------------------------------------------------------
+    // .glb
+    // ---------------------------------------------------------------
+    if (ext == ".glb") {
+        if (!isSameFile) {
+            try {
+                fs::copy_file(sourcePath, localAssetPath, fs::copy_options::overwrite_existing);
+                TraceLog(LOG_INFO, TextFormat("PIPELINE: GLB copied to %s", localAssetPathStr.c_str()));
+            } catch (const fs::filesystem_error& e) {
+                TraceLog(LOG_ERROR, TextFormat("PIPELINE: Failed to copy GLB: %s", e.what()));
+            }
+        } else {
+            TraceLog(LOG_INFO, "PIPELINE: GLB already in target location. Skipping copy.");
+        }
+
+        // Always run the repacker just in case it hasn't been formatted yet
+        std::string repackCmd = "py nexus_glb_repacker.py \"" + localAssetPathStr + "\"";
+        int result = std::system(repackCmd.c_str());
+
+        if (result == 0) {
+            TraceLog(LOG_INFO, "PIPELINE: GLB repacked — all textures now Raylib-compatible.");
+        } else {
+            TraceLog(LOG_WARNING, "PIPELINE: Repacker failed or not found. Textures may be white.");
+        }
+
+        return localAssetPathStr;
+    }
+
+    return sourceFilePath;
 }

@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 #include "raylib.h"
-#include "nexus_asset_browser.h" 
+#include "nexus_core.h"
 
 // Expose the thumbnail generator to the main engine
 Texture2D GenerateThumbnail(const std::string& path, bool isEnv);

@@ -1,0 +1,66 @@
+{
+  "asset": "attempt8hundred.glb",
+  "type": "Environment",
+  "materials": [
+    {
+      "id": 2,
+      "albedo": "12_Albedo_Material003.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 3,
+      "albedo": "2_Albedo_Material009.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 5,
+      "albedo": "0_Albedo_Material008.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 7,
+      "albedo": "7_Albedo_material_7.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 8,
+      "albedo": "6_Albedo_da2642e543a3f06231cecae91a2562d4001.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 9,
+      "albedo": "6_Albedo_da2642e543a3f06231cecae91a2562d4001.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 10,
+      "albedo": "0_Albedo_Material008.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 12,
+      "albedo": "0_Albedo_Material008.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 13,
+      "albedo": "0_Albedo_Material008.png",
+      "normal": "",
+      "metalness": ""
+    },
+    {
+      "id": 14,
+      "albedo": "0_Albedo_Material008.png",
+      "normal": "",
+      "metalness": ""
+    }
+  ]
+}

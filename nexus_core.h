@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include <string>
 #include <vector>
+#include "nexus_audio_emitter.h" // --- NEW: Include the Gameplay Audio Emitter
 
 struct Asset {
     std::string name;
@@ -46,4 +47,12 @@ struct SceneObject {
     std::vector<std::string> parasitePaths;
     std::vector<ModelAnimation*> parasiteAnims;
     std::vector<int> parasiteAnimCounts;
+
+    // Animation slot assignments set by Character Creator (index into anims[])
+    // Indexed by (int)PlayerState — 14 states total
+    int playerAnimSlots[14] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
+    // --- NEW: GAMEPLAY AUDIO COMPONENT ---
+    // Handles proximity triggers, interact triggers, and the playlist
+    CharacterAudioComponent audioEmitter;
 };

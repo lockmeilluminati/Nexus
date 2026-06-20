@@ -6,10 +6,10 @@
 #include "raylib.h"
 #include "nexus_core.h"
 #include "nexus_timeline.h"
+#include "nexus_camera_track.h"
 
-void SaveNexusProject(const std::string& filename, const std::vector<SceneObject>& scene, const std::vector<Vector3>& rotations, const NexusTimeline& timeline);
+void SaveNexusProject(const std::string& filename, const std::vector<SceneObject>& scene, const std::vector<Vector3>& rotations, const NexusTimeline& timeline, const NexusCameraTrack& activeCamTrack, bool playerInit, bool useMath, int playerTargetIdx);
 
-// NEW: Loader Function
-void LoadNexusProject(const std::string& filename, std::vector<SceneObject>& scene, std::vector<Vector3>& rotations, NexusTimeline& timeline);
+void LoadNexusProject(const std::string& filename, std::vector<SceneObject>& scene, std::vector<Vector3>& rotations, NexusTimeline& timeline, NexusCameraTrack& activeCamTrack, bool& playerInit, bool& useMath, int& playerTargetIdx);
 
 #endif

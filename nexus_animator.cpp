@@ -263,7 +263,10 @@ void NexusAnimator::Draw(bool& isOpen) {
     ImGui::Spacing();
     ImGui::BeginChild("PropertyEditor", ImVec2(0, 0), true);
     
-    if (selectedBlockIndex >= 0 && selectedBlockIndex < previewObj.montage.size()) {
+    // =========================================================
+    // THE FIX: Strict type-casting (int) added to size()
+    // =========================================================
+    if (selectedBlockIndex >= 0 && selectedBlockIndex < (int)previewObj.montage.size()) {
         auto& b = previewObj.montage[selectedBlockIndex];
         ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Editing Root Offsets: %s", b.animName.c_str());
         ImGui::Separator();
@@ -347,23 +350,37 @@ void NexusAnimator::Draw(bool& isOpen) {
                 }
                 
                 if (targetAnim && targetAnim->keyframeCount > 0) {
-                    if (previewObj.animCount > 0 && targetAnim->boneCount == previewObj.anims[0].boneCount) {
+                    // Use Raylib's official skeleton compatibility check instead of
+                    // manual boneCount comparison — IsModelAnimationValid is the
+                    // documented way to guard UpdateModelAnimation in Raylib 4.5.
+                    if (IsModelAnimationValid(previewObj.model, *targetAnim)) {
                         int localFrame = (int)((playheadTime - activeBlock->startTime) * 60.0f) % targetAnim->keyframeCount;
+                        // Reset transform to identity BEFORE UpdateModelAnimation.
+                        // Raylib bakes model.transform into bone world positions during
+                        // the update — any dirty transform here causes bone explosion.
+                        previewObj.model.transform = MatrixIdentity();
                         UpdateModelAnimation(previewObj.model, *targetAnim, localFrame);
                     } else {
-                        boneMismatch = true; 
+                        boneMismatch = true;
                     }
                 }
-                
-                Matrix bScale = MatrixScale(activeBlock->scaleOffset, activeBlock->scaleOffset, activeBlock->scaleOffset);
-                Matrix bRot = MatrixRotateXYZ({activeBlock->rotationOffset.x*DEG2RAD, activeBlock->rotationOffset.y*DEG2RAD, activeBlock->rotationOffset.z*DEG2RAD});
-                Matrix bTrans = MatrixTranslate(activeBlock->positionOffset.x, activeBlock->positionOffset.y, activeBlock->positionOffset.z);
-                previewObj.model.transform = MatrixMultiply(MatrixMultiply(bScale, bRot), bTrans);
+
+                // Apply block offsets via DrawModelEx — never via model.transform.
+                // Putting translation/scale into model.transform and then calling
+                // UpdateModelAnimation next frame is what causes spaghetti bones.
+                Quaternion qRot = QuaternionFromEuler(
+                    activeBlock->rotationOffset.x * DEG2RAD,
+                    activeBlock->rotationOffset.y * DEG2RAD,
+                    activeBlock->rotationOffset.z * DEG2RAD);
+                Vector3 rotAxis; float rotAngle;
+                QuaternionToAxisAngle(qRot, &rotAxis, &rotAngle);
+                rotAngle *= RAD2DEG;
+                float s = activeBlock->scaleOffset > 0.0f ? activeBlock->scaleOffset : 1.0f;
+                DrawModelEx(previewObj.model, activeBlock->positionOffset, rotAxis, rotAngle, {s, s, s}, WHITE);
             } else {
-                previewObj.model.transform = MatrixIdentity(); 
+                previewObj.model.transform = MatrixIdentity();
+                DrawModel(previewObj.model, Vector3Zero(), 1.0f, WHITE);
             }
-            
-            DrawModel(previewObj.model, Vector3Zero(), 1.0f, WHITE);
         }
         EndMode3D();
     EndTextureMode();

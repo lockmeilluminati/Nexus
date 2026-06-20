@@ -31,11 +31,9 @@ static const char* StateLabel(PlayerState s) {
     }
 }
 
-// Returns the ModelAnimation* for a given slot, searching base anims and parasites
 static ModelAnimation* ResolveAnim(NexusPlayer& player, const PlayerAnimSlot& slot) {
     if (slot.sourcePath.empty()) return nullptr;
 
-    // Check base character anims
     if (slot.sourcePath == player.obj.filePath) {
         if (player.obj.anims && slot.animIndex < player.obj.animCount) {
             return &player.obj.anims[slot.animIndex];
@@ -43,7 +41,6 @@ static ModelAnimation* ResolveAnim(NexusPlayer& player, const PlayerAnimSlot& sl
         return nullptr;
     }
 
-    // Check parasite GLBs
     for (size_t i = 0; i < player.obj.parasitePaths.size(); i++) {
         if (player.obj.parasitePaths[i] == slot.sourcePath) {
             if (slot.animIndex < player.obj.parasiteAnimCounts[i]) {
@@ -54,7 +51,6 @@ static ModelAnimation* ResolveAnim(NexusPlayer& player, const PlayerAnimSlot& sl
     return nullptr;
 }
 
-// Advance a frame counter for a given anim, looping or clamping
 static int AdvanceFrame(int currentFrame, ModelAnimation* anim, bool loop, float dt) {
     if (!anim || anim->keyframeCount == 0) return 0;
     int next = currentFrame + (int)(dt * 60.0f + 0.5f);
@@ -79,7 +75,6 @@ void InitNexusPlayer(NexusPlayer& player, SceneObject character) {
     player.inOneShot = false;
     player.oneShotTimer = 0.0f;
 
-    // Pre-fill labels so the inspector shows readable names
     int count = (int)PlayerState::DEAD + 1;
     for (int i = 0; i < count; i++) {
         player.animSlots[i].label = StateLabel((PlayerState)i);
@@ -87,7 +82,6 @@ void InitNexusPlayer(NexusPlayer& player, SceneObject character) {
         player.animSlots[i].animIndex  = 0;
         player.animSlots[i].loop       = true;
     }
-    // One-shot states shouldn't loop
     player.animSlots[(int)PlayerState::JUMP].loop   = false;
     player.animSlots[(int)PlayerState::LAND].loop   = false;
     player.animSlots[(int)PlayerState::SHOOT].loop  = false;
@@ -95,21 +89,15 @@ void InitNexusPlayer(NexusPlayer& player, SceneObject character) {
     player.animSlots[(int)PlayerState::DEAD].loop   = false;
 }
 
-// ---------------------------------------------------------------
-// State transition helper — starts a blend whenever state changes
-// ---------------------------------------------------------------
-
 static void SetState(NexusPlayer& player, PlayerState newState) {
     if (player.state == newState) return;
-
-    // One-shots can't be interrupted (except by DEAD)
     if (player.inOneShot && newState != PlayerState::DEAD) return;
 
     player.prevState  = player.state;
     player.state      = newState;
-    player.frameB     = player.frameA; // carry old frame into blend-out layer
+    player.frameB     = player.frameA; 
     player.frameA     = 0;
-    player.blendWeight = 0.0f;         // start blend from 0, will ramp to 1.0
+    player.blendWeight = 0.0f;         
 
     bool isOneShot = (newState == PlayerState::SHOOT  ||
                       newState == PlayerState::MELEE   ||
@@ -131,14 +119,40 @@ static void SetState(NexusPlayer& player, PlayerState newState) {
 void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
     float dt = GetFrameTime();
 
-    // --- DEAD: freeze everything ---
+    if (player.isPlayMode) {
+        player.playTimer += dt;
+        if (player.playTimer >= player.playTimeLimit) {
+            player.isPlayMode = false; player.playTimer = 0.f; EnableCursor(); return;
+        }
+
+        // Strictly Third Person Camera logic now
+        if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+            DisableCursor();
+            Vector2 md = GetMouseDelta();
+            player.playCamYaw   += md.x * 0.25f;
+            player.playCamPitch -= md.y * 0.25f;
+            if (player.playCamPitch >  80.f) player.playCamPitch =  80.f;
+            if (player.playCamPitch < -10.f) player.playCamPitch = -10.f;
+        } else { EnableCursor(); }
+        
+        float yr = player.playCamYaw*DEG2RAD, pr = player.playCamPitch*DEG2RAD;
+        Vector3 o = {player.obj.position.x, player.obj.position.y+1.2f, player.obj.position.z};
+        player.playCamera.target   = o;
+        player.playCamera.position = {
+            o.x + player.playCamDist*cosf(pr)*sinf(yr),
+            o.y + player.playCamDist*sinf(pr),
+            o.z + player.playCamDist*cosf(pr)*cosf(yr)};
+        player.playCamera.up={0,1,0}; player.playCamera.fovy=60.f;
+        player.playCamera.projection=CAMERA_PERSPECTIVE;
+        camera = player.playCamera;
+    }
+
     if (player.state == PlayerState::DEAD) {
         player.frameA = AdvanceFrame(player.frameA,
             ResolveAnim(player, player.animSlots[(int)PlayerState::DEAD]), false, dt);
         return;
     }
 
-    // --- ONE-SHOT TIMEOUT ---
     if (player.inOneShot) {
         player.oneShotTimer += dt;
         if (player.oneShotTimer >= player.oneShotDuration) {
@@ -147,7 +161,6 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
         }
     }
 
-    // --- GRAVITY & JUMP ---
     if (!player.isGrounded) {
         player.jumpVelocity += player.gravity * dt;
         player.obj.position.y += player.jumpVelocity * dt;
@@ -163,18 +176,15 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
     }
 
     if (!player.inOneShot) {
-        // --- JUMP INPUT ---
         if (player.isGrounded && IsKeyPressed(KEY_SPACE)) {
             player.isGrounded = false;
             player.jumpVelocity = 8.0f;
             SetState(player, PlayerState::JUMP);
         }
 
-        // --- SHOOT / MELEE ---
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))  SetState(player, PlayerState::SHOOT);
         if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) SetState(player, PlayerState::MELEE);
 
-        // --- MOVEMENT INPUT ---
         if (player.isGrounded) {
             bool running    = IsKeyDown(KEY_LEFT_SHIFT);
             bool moveForward = IsKeyDown(KEY_W);
@@ -182,7 +192,6 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
             bool strafeLeft  = IsKeyDown(KEY_A);
             bool strafeRight = IsKeyDown(KEY_D);
 
-            // Camera-relative forward/right vectors (ignore Y)
             Vector3 camForward = Vector3Normalize({
                 camera.target.x - camera.position.x, 0.0f,
                 camera.target.z - camera.position.z });
@@ -202,15 +211,12 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
                 player.obj.position = Vector3Add(player.obj.position,
                     Vector3Scale(moveDir, speed * dt));
 
-                // Smoothly rotate character toward movement direction
                 float targetYaw = atan2f(moveDir.x, moveDir.z) * RAD2DEG;
                 float diff = targetYaw - player.rotation.y;
-                // Wrap diff to [-180, 180]
                 while (diff >  180.0f) diff -= 360.0f;
                 while (diff < -180.0f) diff += 360.0f;
                 player.rotation.y += diff * std::min(dt * 12.0f, 1.0f);
 
-                // Choose state
                 if (running) {
                     SetState(player, PlayerState::RUN);
                 } else if (strafeLeft && !moveForward && !moveBack) {
@@ -218,7 +224,6 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
                 } else if (strafeRight && !moveForward && !moveBack) {
                     SetState(player, PlayerState::STRAFE_RIGHT);
                 } else {
-                    // Check mouse delta to blend in turn animations
                     float mouseDX = GetMouseDelta().x;
                     if (mouseDX < -player.turnBlendThreshold) {
                         SetState(player, PlayerState::TURN_LEFT);
@@ -236,13 +241,10 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
         }
     }
 
-    // --- BLEND WEIGHT RAMP ---
-    // Regardless of state, ramp blendWeight toward 1.0 each frame
     player.blendWeight += dt * player.blendSpeed;
     if (player.blendWeight > 1.0f) player.blendWeight = 1.0f;
 
-    // --- ADVANCE ANIMATION FRAMES ---
-    float dt_clamped = std::min(dt, 0.05f); // Safety clamp
+    float dt_clamped = std::min(dt, 0.05f); 
 
     PlayerAnimSlot& slotA = player.animSlots[(int)player.state];
     ModelAnimation* animA = ResolveAnim(player, slotA);
@@ -260,29 +262,18 @@ void UpdateNexusPlayer(NexusPlayer& player, Camera3D& camera) {
 // ---------------------------------------------------------------
 
 void DrawNexusPlayer(NexusPlayer& player) {
-    // Apply current state animation
     PlayerAnimSlot& slotA = player.animSlots[(int)player.state];
     ModelAnimation* animA = ResolveAnim(player, slotA);
 
+    // Third Person: identity before update, rotation only via DrawModelEx.
+    player.obj.model.transform = MatrixIdentity();
     if (animA && animA->keyframeCount > 0 &&
-        animA->boneCount == (player.obj.anims ? player.obj.anims[0].boneCount : animA->boneCount)) {
+        IsModelAnimationValid(player.obj.model, *animA)) {
         UpdateModelAnimation(player.obj.model, *animA, player.frameA);
     }
-
-    // While blending, also apply the previous state anim and lerp result
-    // (Raylib doesn't have native blend weights, so we re-apply the target
-    //  anim on top — the snap is invisible at blendSpeed = 8.0f+)
-    // A full bone-level lerp would require direct BoneTransform access;
-    // this gives clean-feeling snappy blends without crashing.
-
-    // Build transform from rotation
-    Matrix rotMat = MatrixRotateY(player.rotation.y * DEG2RAD);
-    player.obj.model.transform = rotMat;
-
-    DrawModel(player.obj.model, player.obj.position, player.obj.scale, WHITE);
-
-    // Debug: draw bounding box while in editor
-    // DrawBoundingBox(player.obj.bounds, GREEN);
+    Vector3 rotAxis = { 0.0f, 1.0f, 0.0f };
+    Vector3 scaleVec = { player.obj.scale, player.obj.scale, player.obj.scale };
+    DrawModelEx(player.obj.model, player.obj.position, rotAxis, player.rotation.y, scaleVec, WHITE);
 }
 
 // ---------------------------------------------------------------
@@ -314,8 +305,6 @@ void DrawPlayerInspector(NexusPlayer& player, bool& isOpen) {
     ImGui::TextDisabled("Assign a GLB and clip index to each state.");
     ImGui::Spacing();
 
-    // Collect all available source paths + anim names for the combo
-    // Sources: base character + all parasites
     std::vector<std::string> sources;
     if (!player.obj.filePath.empty()) sources.push_back(player.obj.filePath);
     for (auto& p : player.obj.parasitePaths) sources.push_back(p);
@@ -328,7 +317,6 @@ void DrawPlayerInspector(NexusPlayer& player, bool& isOpen) {
         ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "%-18s", slot.label.c_str());
         ImGui::SameLine();
 
-        // Source file picker
         std::string shortName = slot.sourcePath.empty() ? "(none)" :
             slot.sourcePath.substr(slot.sourcePath.find_last_of("/\\") + 1);
         ImGui::SetNextItemWidth(160);
@@ -345,10 +333,8 @@ void DrawPlayerInspector(NexusPlayer& player, bool& isOpen) {
             ImGui::EndCombo();
         }
 
-        // Clip index picker — shows anim names if available
         ImGui::SameLine();
         if (!slot.sourcePath.empty()) {
-            // Resolve max anims for this source
             int maxAnims = 0;
             std::vector<std::string> animNames;
 
@@ -400,7 +386,6 @@ void DrawPlayerInspector(NexusPlayer& player, bool& isOpen) {
     ImGui::Spacing();
     ImGui::Separator();
 
-    // Load additional parasite GLBs from inside the inspector
     ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Load Animation Pack (Parasite GLB)");
     if (ImGui::Button("Browse...", ImVec2(-1, 28))) {
         std::string path = OpenGLTFFileDialog();
@@ -417,5 +402,36 @@ void DrawPlayerInspector(NexusPlayer& player, bool& isOpen) {
         }
     }
 
+    ImGui::End();
+}
+
+void EnterPlayMode(NexusPlayer& player, float limit) {
+    player.isPlayMode=true; player.playTimer=0.f; player.playTimeLimit=limit;
+    player.state=PlayerState::IDLE; player.prevState=PlayerState::IDLE;
+    player.blendWeight=1.f; player.frameA=player.frameB=0; player.inOneShot=false;
+    player.playCamYaw=player.rotation.y; player.playCamPitch=20.f; player.playCamDist=6.f;
+    player.playCamera.up={0,1,0}; player.playCamera.fovy=60.f;
+    player.playCamera.projection=CAMERA_PERSPECTIVE;
+    TraceLog(LOG_INFO,"PLAY MODE: %.1fs",limit);
+}
+
+void DrawPlayModeHUD(NexusPlayer& player) {
+    if (!player.isPlayMode) return;
+    bool inf = player.playTimeLimit>=999990.f;
+    float rem = std::max(0.f,player.playTimeLimit-player.playTimer);
+    ImGuiIO& io=ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x*.5f,20),ImGuiCond_Always,ImVec2(.5f,0));
+    ImGui::SetNextWindowBgAlpha(.65f);
+    ImGui::Begin("##phud",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoNav);
+    ImVec4 col=inf?ImVec4(.4f,1,.5f,1):rem>3?ImVec4(.2f,1,.3f,1):ImVec4(1,.3f,.1f,1);
+    if(inf) ImGui::TextColored(col,"  PLAY MODE  |  INFINITE  ");
+    else    ImGui::TextColored(col,"  PLAY MODE  |  %.1fs remaining  ",rem);
+    ImGui::End();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x*.5f,52),ImGuiCond_Always,ImVec2(.5f,0));
+    ImGui::SetNextWindowBgAlpha(.65f);
+    ImGui::Begin("##pstop",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoNav);
+    ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.7f,.1f,.1f,1));
+    if(ImGui::Button(" STOP GAME ")) { player.isPlayMode=false; player.playTimer=0; EnableCursor(); }
+    ImGui::PopStyleColor();
     ImGui::End();
 }

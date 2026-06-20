@@ -1,159 +1,160 @@
 #include "nexus_scene_manager.h"
 #include "imgui.h"
 #include <string>
+#include <algorithm> // Required for std::max safety
 
 static void DeleteSceneObject(std::vector<SceneObject>& scene,
                                std::vector<Vector3>& rotations,
                                NexusTimeline& timeline,
-                               int& selectedIndex,
-                               int index) {
-    // Unload GPU resources
+                               int& selectedIndex, int index) {
     SceneObject& obj = scene[index];
     UnloadModel(obj.model);
-    if (obj.isAnimated && obj.anims != nullptr)
+    if (obj.isAnimated && obj.anims)
         UnloadModelAnimations(obj.anims, obj.animCount);
-    for (size_t i = 0; i < obj.parasiteAnims.size(); i++)
+    for (size_t i=0;i<obj.parasiteAnims.size();i++)
         UnloadModelAnimations(obj.parasiteAnims[i], obj.parasiteAnimCounts[i]);
-
-    scene.erase(scene.begin() + index);
-    rotations.erase(rotations.begin() + index);
-    if (index < (int)timeline.tracks.size())
-        timeline.tracks.erase(timeline.tracks.begin() + index);
-
-    // Fix selection index
-    if (selectedIndex >= (int)scene.size())
-        selectedIndex = (int)scene.size() - 1;
-    if (scene.empty()) selectedIndex = -1;
-
-    TraceLog(LOG_INFO, "SCENE MANAGER: Deleted object at index %d", index);
+    scene.erase(scene.begin()+index);
+    rotations.erase(rotations.begin()+index);
+    if (index<(int)timeline.tracks.size())
+        timeline.tracks.erase(timeline.tracks.begin()+index);
+    if (selectedIndex>=(int)scene.size()) selectedIndex=(int)scene.size()-1;
+    if (scene.empty()) selectedIndex=-1;
 }
 
 void NexusSceneManager::Draw(bool& isOpen,
                               std::vector<SceneObject>& scene,
                               std::vector<Vector3>& rotations,
                               NexusTimeline& timeline,
-                              int& selectedObjectIndex) {
+                              int& selectedObjectIndex,
+                              int& selectedTextIndex, 
+                              NexusPlayer& player,
+                              bool& playerInitialized) {
     if (!isOpen) return;
 
-    ImGui::SetNextWindowSize(ImVec2(340, 420), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(260, 200), ImVec2(600, 900));
-    ImGui::Begin("Scene Manager", &isOpen);
-
-    ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Scene Objects");
-    ImGui::TextDisabled("%d object(s) in scene", (int)scene.size());
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    if (scene.empty()) {
-        ImGui::TextDisabled("No objects in scene yet.");
-        ImGui::TextDisabled("Place assets from the Asset Browser.");
+    // THE FIX: Force the window to spawn safely on-screen and bypass corrupted INI caches
+    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_Appearing); 
+    ImGui::SetNextWindowSize(ImVec2(350, 500), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(260,200), ImVec2(800,1000));
+    
+    // Changing the window title busts the ImGui cache so it forgets the broken layout!
+    if (!ImGui::Begin("Scene Hierarchy", &isOpen)) {
         ImGui::End();
         return;
     }
 
-    int deleteIndex = -1;
+    // ---------------------------------------------------------------
+    // 3D SCENE OBJECTS
+    // ---------------------------------------------------------------
+    ImGui::TextColored(ImVec4(0.5f,0.8f,1.f,1.f),"Scene Objects");
+    ImGui::TextDisabled("%d object(s)",(int)scene.size());
+    ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
 
-    for (int i = 0; i < (int)scene.size(); i++) {
-        ImGui::PushID(i);
-
-        bool isSelected = (selectedObjectIndex == i);
-
-        // Row highlight for selected
-        if (isSelected) {
-            ImVec2 rowMin = ImGui::GetCursorScreenPos();
-            ImVec2 rowMax = ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x, rowMin.y + 22);
-            ImGui::GetWindowDrawList()->AddRectFilled(rowMin, rowMax, IM_COL32(40, 100, 180, 80));
-        }
-
-        // Object type icon colour
-        ImVec4 typeColor = scene[i].isAnimated
-            ? ImVec4(1.0f, 0.6f, 0.2f, 1.0f)   // orange = animated character
-            : ImVec4(0.4f, 0.9f, 0.4f, 1.0f);   // green = environment/static
-
-        ImGui::TextColored(typeColor, scene[i].isAnimated ? "[CHAR]" : "[ENV] ");
-        ImGui::SameLine();
-
-        // Clickable name — selects the object
-        std::string label = scene[i].name.empty() ? ("Object " + std::to_string(i)) : scene[i].name;
-        if (!timeline.tracks.empty() && i < (int)timeline.tracks.size())
-            label = timeline.tracks[i].assetName;
-
-        if (ImGui::Selectable(label.c_str(), isSelected, 0, ImVec2(ImGui::GetContentRegionAvail().x - 60, 0)))
-            selectedObjectIndex = i;
-
-        ImGui::SameLine();
-
-        // Position display
-        ImGui::TextDisabled("(%.1f, %.1f, %.1f)",
-            scene[i].position.x, scene[i].position.y, scene[i].position.z);
-
-        // Delete button
-        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 28 + ImGui::GetCursorPosX() - ImGui::GetContentRegionAvail().x);
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
-        if (ImGui::SmallButton(" X ")) deleteIndex = i;
-        ImGui::PopStyleColor(2);
-
-        // Right-click context menu on the row
-        if (ImGui::BeginPopupContextItem("##sceneobj_ctx")) {
-            ImGui::TextDisabled("%s", label.c_str());
-            ImGui::Separator();
-            if (ImGui::MenuItem("Select")) selectedObjectIndex = i;
-            if (ImGui::MenuItem("Focus Camera")) {
-                // Just selects for now — camera focus can be wired later
-                selectedObjectIndex = i;
+    int delIdx=-1;
+    if (scene.empty()) {
+        ImGui::TextDisabled("No 3D objects placed yet.");
+    } else {
+        for (int i=0;i<(int)scene.size();i++) {
+            ImGui::PushID(i);
+            bool isSel=(selectedObjectIndex==i);
+            if (isSel) {
+                ImVec2 rMin=ImGui::GetCursorScreenPos();
+                ImVec2 rMax=ImVec2(rMin.x+ImGui::GetContentRegionAvail().x,rMin.y+22);
+                ImGui::GetWindowDrawList()->AddRectFilled(rMin,rMax,IM_COL32(40,100,180,80));
             }
+            ImVec4 tc=scene[i].isAnimated?ImVec4(1.f,.6f,.2f,1.f):ImVec4(.4f,.9f,.4f,1.f);
+            ImGui::TextColored(tc,scene[i].isAnimated?"[CHAR]":"[ENV] ");
+            ImGui::SameLine();
+            std::string lbl=(!timeline.tracks.empty()&&i<(int)timeline.tracks.size())
+                ?timeline.tracks[i].assetName:(scene[i].name.empty()?"Object "+std::to_string(i):scene[i].name);
+            
+            // Dynamic width protection
+            float availW = ImGui::GetContentRegionAvail().x;
+            float btnW = std::max(10.0f, availW - 36.0f);
+            
+            if (ImGui::Selectable(lbl.c_str(),isSel,0,ImVec2(btnW,0))) {
+                selectedObjectIndex=i;
+                selectedTextIndex=-1; 
+            }
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.6f,.1f,.1f,1.f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(.9f,.2f,.2f,1.f));
+            if (ImGui::SmallButton(" X ")) delIdx=i;
+            ImGui::PopStyleColor(2);
             ImGui::Separator();
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
-            if (ImGui::MenuItem("Delete")) deleteIndex = i;
-            ImGui::PopStyleColor();
-            ImGui::EndPopup();
+            ImGui::PopID();
         }
+    }
+    if (delIdx>=0) DeleteSceneObject(scene,rotations,timeline,selectedObjectIndex,delIdx);
 
-        ImGui::Separator();
-        ImGui::PopID();
+    ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+    // ---------------------------------------------------------------
+    // TEXT TRACKS
+    // ---------------------------------------------------------------
+    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Cinematic Text Overlays");
+    ImGui::TextDisabled("%d overlay(s)",(int)timeline.textTracks.size());
+    ImGui::Spacing();
+
+    int textDelIdx = -1;
+    if (timeline.textTracks.empty()) {
+        ImGui::TextDisabled("No text tracks placed yet.");
+    } else {
+        for (int i=0; i < (int)timeline.textTracks.size(); i++) {
+            ImGui::PushID(10000 + i);
+            bool isSel = (selectedTextIndex == i);
+            if (isSel) {
+                ImVec2 rMin=ImGui::GetCursorScreenPos();
+                ImVec2 rMax=ImVec2(rMin.x+ImGui::GetContentRegionAvail().x,rMin.y+22);
+                ImGui::GetWindowDrawList()->AddRectFilled(rMin,rMax,IM_COL32(180,100,40,80));
+            }
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "[TEXT]");
+            ImGui::SameLine();
+            
+            // Dynamic width protection
+            float availW = ImGui::GetContentRegionAvail().x;
+            float btnW = std::max(10.0f, availW - 36.0f);
+            
+            if (ImGui::Selectable(timeline.textTracks[i].trackName.c_str(), isSel, 0, ImVec2(btnW,0))) {
+                selectedTextIndex = i;
+                selectedObjectIndex = -1; 
+            }
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.6f,.1f,.1f,1.f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(.9f,.2f,.2f,1.f));
+            if (ImGui::SmallButton(" X ")) textDelIdx=i;
+            ImGui::PopStyleColor(2);
+            ImGui::Separator();
+            ImGui::PopID();
+        }
+    }
+    
+    if (textDelIdx >= 0) {
+        timeline.textTracks.erase(timeline.textTracks.begin() + textDelIdx);
+        if (selectedTextIndex == textDelIdx) selectedTextIndex = -1;
+        else if (selectedTextIndex > textDelIdx) selectedTextIndex--;
     }
 
-    // Process deletion outside the loop
-    if (deleteIndex >= 0)
-        DeleteSceneObject(scene, rotations, timeline, selectedObjectIndex, deleteIndex);
+    ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
 
+    // ---------------------------------------------------------------
+    // PLAYABLE CHARACTER
+    // ---------------------------------------------------------------
+    ImGui::TextColored(ImVec4(.4f,1.f,.5f,1.f),"Playable Character");
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
 
-    // Clear all button
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
-    if (ImGui::Button("Clear Entire Scene", ImVec2(-1, 28))) {
-        ImGui::OpenPopup("ConfirmClear");
-    }
-    ImGui::PopStyleColor();
-
-    if (ImGui::BeginPopupModal("ConfirmClear", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Delete ALL objects from the scene?");
-        ImGui::Text("This cannot be undone.");
+    if (!playerInitialized || player.obj.model.meshCount==0) {
+        ImGui::TextDisabled("No player assigned.");
+    } else {
+        ImGui::TextColored(ImVec4(.5f,1.f,.6f,1.f),"[PLAYER]");
+        ImGui::SameLine();
+        ImGui::TextUnformatted(player.obj.name.empty()?"Player Character":player.obj.name.c_str());
         ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
-        if (ImGui::Button("Yes, Clear All", ImVec2(140, 0))) {
-            // Unload all objects
-            for (auto& obj : scene) {
-                UnloadModel(obj.model);
-                if (obj.isAnimated && obj.anims != nullptr)
-                    UnloadModelAnimations(obj.anims, obj.animCount);
-                for (size_t i = 0; i < obj.parasiteAnims.size(); i++)
-                    UnloadModelAnimations(obj.parasiteAnims[i], obj.parasiteAnimCounts[i]);
-            }
-            scene.clear();
-            rotations.clear();
-            timeline.tracks.clear();
-            selectedObjectIndex = -1;
-            ImGui::CloseCurrentPopup();
+        ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.5f,.1f,.1f,1.f));
+        if (ImGui::Button("Remove Player",ImVec2(-1,24))) {
+            playerInitialized=false; player.isPlayMode=false;
+            player.obj=SceneObject{}; EnableCursor();
         }
         ImGui::PopStyleColor();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(80, 0))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
     }
 
     ImGui::End();

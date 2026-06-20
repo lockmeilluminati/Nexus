@@ -4,14 +4,12 @@
 #include <string>
 #include <vector>
 
-// Per-material slot override — lets you colour skin, clothing, armour separately
 struct MaterialSlotOverride {
-    std::string label       = "Material";
-    Color       color       = WHITE;
-    bool        enabled     = true;     // toggle per-slot
+    std::string label   = "Material";
+    Color       color   = WHITE;
+    bool        enabled = true;
 };
 
-// A saved character appearance preset
 struct CharacterPreset {
     std::string name;
     std::vector<MaterialSlotOverride> slots;
@@ -19,25 +17,29 @@ struct CharacterPreset {
 
 class NexusCharacterCreator {
 public:
-    std::vector<MaterialSlotOverride> slots;    // One entry per material on the loaded model
-    std::vector<CharacterPreset>      presets;  // Saved looks
+    std::vector<MaterialSlotOverride> slots;
+    std::vector<CharacterPreset>      presets;
+    bool  sendToPlayer    = false;
+    bool  hasPendingColor = false;
+    Color pendingColor    = WHITE;
+    
+    // NEW: The kill switch to return to the hub menu
+    bool  requestClear    = false;
 
-    // Call once after a character is loaded/selected — reads material count from obj
     void InitFromObject(const SceneObject& obj);
-
-    // Applies current slot colours to the object every frame (call after InitFromObject)
     void ApplyToObject(SceneObject& obj);
-
-    // ImGui panel — pass your currently selected SceneObject
     void Draw(SceneObject& obj, bool& isOpen);
 
 private:
-    char presetNameBuf[64] = "";
+    char        presetNameBuf[64] = "";
+    std::string trackedFilePath;
+    int         skinTargetSlot = 0;
+
+    void DrawColorTab(SceneObject& obj); 
     void SavePreset();
     void LoadPreset(int index, SceneObject& obj);
 
-    // Built-in skin tone palette
-    static const int PALETTE_SIZE = 12;
+    static const int   PALETTE_SIZE = 12;
     static const Color skinPalette[PALETTE_SIZE];
     static const char* skinPaletteLabels[PALETTE_SIZE];
 };

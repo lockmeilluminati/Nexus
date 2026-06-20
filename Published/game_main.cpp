@@ -10,7 +10,7 @@
 
 struct GameObj { Model model; Vector3 pos; Vector3 rot; Vector3 pivot; float scale; bool isAnim; ModelAnimation* anims; int animCount; std::vector<Vector3> waypoints; float walkSpeed; bool loopWP; int currentWP; int currentAnimIdx; };
 struct CamWP { float transitTime; float holdTime; Vector3 pos; Vector3 target; float fov; };
-struct CamTrack { float startSec; float playbackSpeed; std::vector<CamWP> waypoints; };
+struct CamTrack { float startSec; float endSec; float trimStart; float playbackSpeed; std::vector<CamWP> waypoints; };
 struct TextFX { std::string text; float start; float duration; float px; float py; float size; float spacing; Color col; bool isBold; bool hasShadow; int effect; float fxSpeed; float fxIntensity; };
 struct AudioFX { Sound snd; float start; bool played; };
 struct GameZone { float start; float end; };
@@ -124,6 +124,12 @@ int main() {
         else if(currentTrack != nullptr && line.find("StartSec=") == 0) {
             currentTrack->startSec = std::stof(line.substr(9));
         }
+        else if(currentTrack != nullptr && line.find("EndSec=") == 0) {
+            currentTrack->endSec = std::stof(line.substr(7));
+        }
+        else if(currentTrack != nullptr && line.find("TrimStart=") == 0) {
+            currentTrack->trimStart = std::stof(line.substr(10));
+        }
         else if(currentTrack != nullptr && line.find("PlaybackSpeed=") == 0) {
             currentTrack->playbackSpeed = std::stof(line.substr(14));
         }
@@ -155,8 +161,8 @@ int main() {
         bool cameraOverride = false;
         for (auto& ct : camTracks) {
             if (ct.waypoints.empty()) continue;
-            float localTime = currentTime - ct.startSec;
-            if (localTime >= 0.0f) {
+            if (currentTime >= ct.startSec && currentTime <= ct.endSec) {
+                float localTime = (currentTime - ct.startSec) + ct.trimStart;
                 float currentRealTime = 0.0f;
                 bool trackActive = false;
                 for (size_t i = 0; i < ct.waypoints.size(); i++) {
@@ -175,7 +181,7 @@ int main() {
                         int i2 = (int)i;
                         int i3 = ((int)i + 1 > n - 1) ? n - 1 : (int)i + 1;
                         camera.position = CatmullRom(ct.waypoints[i0].pos, ct.waypoints[i1].pos, ct.waypoints[i2].pos, ct.waypoints[i3].pos, easeT);
-                        camera.target = CatmullRom(ct.waypoints[i0].target, ct.waypoints[i1].target, ct.waypoints[i2].target, ct.waypoints[i3].target, easeT);
+                        camera.target = CatmullRom(ct.waypoints[i0].target,   ct.waypoints[i1].target,   ct.waypoints[i2].target,   ct.waypoints[i3].target,   easeT);
                         camera.fovy = ct.waypoints[i1].fov + (ct.waypoints[i2].fov - ct.waypoints[i1].fov) * easeT;
                         break;
                     }
@@ -193,7 +199,6 @@ int main() {
                 }
             }
         }
-        
         bool inZone = zones.empty() ? true : false;
         for (auto& z : zones) { if (currentTime >= z.start && currentTime <= z.end) inZone = true; }
         

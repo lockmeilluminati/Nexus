@@ -4,8 +4,14 @@
 # Executables
 *.exe
 
-# ImGui layout memory
+# Machine Learning / Heavy Models
+*.task
+
+# UI Configuration states
 imgui.ini
 
-# VS Code settings (optional, but good practice)
+# Editor / IDE settings
 .vscode/
+
+# Build Output / Published folders
+Published/

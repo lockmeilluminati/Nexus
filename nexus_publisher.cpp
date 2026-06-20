@@ -117,7 +117,6 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
         if (obj.filePath != "PROCEDURAL_MOCAP") { 
             Vector3 pivot = { (obj.bounds.max.x + obj.bounds.min.x) / 2.0f, obj.bounds.min.y, (obj.bounds.max.z + obj.bounds.min.z) / 2.0f };
             
-            // THE FIX: We now export the active animation index to the Published Game!
             int animIdx = (i < timeline.tracks.size()) ? timeline.tracks[i].currentAnimIndex : 0;
             
             f << "Asset=" << obj.filePath << "," 
@@ -138,6 +137,11 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             if (ct.waypoints.empty()) continue;
             f << "[CameraTrack]\n";
             f << "StartSec=" << (ct.timelineStartFrame / 60.0f) << "\n";
+            
+            // THE FIX: We now export the exact cut timings to the engine!
+            f << "EndSec=" << (ct.timelineEndFrame / 60.0f) << "\n";
+            f << "TrimStart=" << ct.trimStart << "\n";
+            
             f << "PlaybackSpeed=" << ct.rig.playbackSpeed << "\n";
             for (const auto& wp : ct.waypoints) {
                 f << "CamWP=" << wp.transitTime << ","
@@ -167,11 +171,12 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "#include <cmath>\n"; 
             cpp << "\n";
             
-            // THE FIX: GameObj now stores 'currentAnimIdx'
             cpp << "struct GameObj { Model model; Vector3 pos; Vector3 rot; Vector3 pivot; float scale; bool isAnim; ModelAnimation* anims; int animCount; std::vector<Vector3> waypoints; float walkSpeed; bool loopWP; int currentWP; int currentAnimIdx; };\n";
             
+            // THE FIX: The CamTrack struct now holds the endSec and trim offsets
             cpp << "struct CamWP { float transitTime; float holdTime; Vector3 pos; Vector3 target; float fov; };\n";
-            cpp << "struct CamTrack { float startSec; float playbackSpeed; std::vector<CamWP> waypoints; };\n";
+            cpp << "struct CamTrack { float startSec; float endSec; float trimStart; float playbackSpeed; std::vector<CamWP> waypoints; };\n";
+            
             cpp << "struct TextFX { std::string text; float start; float duration; float px; float py; float size; float spacing; Color col; bool isBold; bool hasShadow; int effect; float fxSpeed; float fxIntensity; };\n";
             cpp << "struct AudioFX { Sound snd; float start; bool played; };\n";
             cpp << "struct GameZone { float start; float end; };\n";
@@ -243,8 +248,6 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "            std::getline(ss, path, ','); std::getline(ss, px, ','); std::getline(ss, py, ','); std::getline(ss, pz, ','); std::getline(ss, s, ',');\n";
             cpp << "            std::getline(ss, rx, ','); std::getline(ss, ry, ','); std::getline(ss, rz, ',');\n";
             cpp << "            std::getline(ss, pvx, ','); std::getline(ss, pvy, ','); std::getline(ss, pvz, ',');\n";
-            
-            // THE FIX: Safely parse the trailing Animation Index from the CSV string!
             cpp << "            std::getline(ss, wspd, ','); std::getline(ss, lwp, ','); std::getline(ss, animIdxStr, ',');\n";
             cpp << "            GameObj o; o.model = LoadModel(path.c_str());\n";
             cpp << "            try { o.pos = { std::stof(px), std::stof(py), std::stof(pz) }; o.scale = std::stof(s);\n";
@@ -294,6 +297,15 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "        else if(currentTrack != nullptr && line.find(\"StartSec=\") == 0) {\n";
             cpp << "            currentTrack->startSec = std::stof(line.substr(9));\n";
             cpp << "        }\n";
+            
+            // THE FIX: Parse the new Cut bounds!
+            cpp << "        else if(currentTrack != nullptr && line.find(\"EndSec=\") == 0) {\n";
+            cpp << "            currentTrack->endSec = std::stof(line.substr(7));\n";
+            cpp << "        }\n";
+            cpp << "        else if(currentTrack != nullptr && line.find(\"TrimStart=\") == 0) {\n";
+            cpp << "            currentTrack->trimStart = std::stof(line.substr(10));\n";
+            cpp << "        }\n";
+
             cpp << "        else if(currentTrack != nullptr && line.find(\"PlaybackSpeed=\") == 0) {\n";
             cpp << "            currentTrack->playbackSpeed = std::stof(line.substr(14));\n";
             cpp << "        }\n";
@@ -332,8 +344,11 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "        bool cameraOverride = false;\n";
             cpp << "        for (auto& ct : camTracks) {\n";
             cpp << "            if (ct.waypoints.empty()) continue;\n";
-            cpp << "            float localTime = currentTime - ct.startSec;\n";
-            cpp << "            if (localTime >= 0.0f) {\n";
+            
+            // THE FIX: Safely bind the playback bounds to the timeline cuts!
+            cpp << "            if (currentTime >= ct.startSec && currentTime <= ct.endSec) {\n";
+            cpp << "                float localTime = (currentTime - ct.startSec) + ct.trimStart;\n";
+            
             cpp << "                float currentRealTime = 0.0f;\n";
             cpp << "                bool trackActive = false;\n";
             cpp << "                for (size_t i = 0; i < ct.waypoints.size(); i++) {\n";
@@ -352,7 +367,7 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "                        int i2 = (int)i;\n";
             cpp << "                        int i3 = ((int)i + 1 > n - 1) ? n - 1 : (int)i + 1;\n";
             cpp << "                        camera.position = CatmullRom(ct.waypoints[i0].pos, ct.waypoints[i1].pos, ct.waypoints[i2].pos, ct.waypoints[i3].pos, easeT);\n";
-            cpp << "                        camera.target = CatmullRom(ct.waypoints[i0].target, ct.waypoints[i1].target, ct.waypoints[i2].target, ct.waypoints[i3].target, easeT);\n";
+            cpp << "                        camera.target = CatmullRom(ct.waypoints[i0].target,   ct.waypoints[i1].target,   ct.waypoints[i2].target,   ct.waypoints[i3].target,   easeT);\n";
             cpp << "                        camera.fovy = ct.waypoints[i1].fov + (ct.waypoints[i2].fov - ct.waypoints[i1].fov) * easeT;\n";
             cpp << "                        break;\n";
             cpp << "                    }\n";
@@ -371,7 +386,6 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "                }\n";
             cpp << "            }\n";
             cpp << "        }\n";
-            cpp << "        \n";
             
             cpp << "        bool inZone = zones.empty() ? true : false;\n";
             cpp << "        for (auto& z : zones) { if (currentTime >= z.start && currentTime <= z.end) inZone = true; }\n";
@@ -431,7 +445,6 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "                }\n";
             cpp << "            }\n";
             
-            // THE FIX: We now explicitly force game_main.cpp to play the saved animation index!
             cpp << "            if (o.isAnim && o.currentAnimIdx < o.animCount) UpdateModelAnimation(o.model, o.anims[o.currentAnimIdx], animFrame % o.anims[o.currentAnimIdx].keyframeCount);\n";
             
             cpp << "            Matrix tPivot = MatrixTranslate(-o.pivot.x, -o.pivot.y, -o.pivot.z);\n";

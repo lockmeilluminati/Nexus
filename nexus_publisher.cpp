@@ -96,8 +96,11 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
         f << "Zone=" << startSec << "," << endSec << "\n";
     }
 
+    // ---------------------------------------------------------
+    // THE AUDIO FIX: Write the volume parameter to the output file
+    // ---------------------------------------------------------
     for (const auto& trk : timeline.audioManager.tracks) {
-        f << "Audio=" << trk.filePath << "," << (trk.startFrame / 60.0f) << "\n";
+        f << "Audio=" << trk.filePath << "," << (trk.startFrame / 60.0f) << "," << trk.volume << "\n";
     }
 
     for (const auto& txt : timeline.textTracks) {
@@ -137,11 +140,8 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             if (ct.waypoints.empty()) continue;
             f << "[CameraTrack]\n";
             f << "StartSec=" << (ct.timelineStartFrame / 60.0f) << "\n";
-            
-            // THE FIX: We now export the exact cut timings to the engine!
             f << "EndSec=" << (ct.timelineEndFrame / 60.0f) << "\n";
             f << "TrimStart=" << ct.trimStart << "\n";
-            
             f << "PlaybackSpeed=" << ct.rig.playbackSpeed << "\n";
             for (const auto& wp : ct.waypoints) {
                 f << "CamWP=" << wp.transitTime << ","
@@ -172,13 +172,12 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "\n";
             
             cpp << "struct GameObj { Model model; Vector3 pos; Vector3 rot; Vector3 pivot; float scale; bool isAnim; ModelAnimation* anims; int animCount; std::vector<Vector3> waypoints; float walkSpeed; bool loopWP; int currentWP; int currentAnimIdx; };\n";
-            
-            // THE FIX: The CamTrack struct now holds the endSec and trim offsets
             cpp << "struct CamWP { float transitTime; float holdTime; Vector3 pos; Vector3 target; float fov; };\n";
             cpp << "struct CamTrack { float startSec; float endSec; float trimStart; float playbackSpeed; std::vector<CamWP> waypoints; };\n";
-            
             cpp << "struct TextFX { std::string text; float start; float duration; float px; float py; float size; float spacing; Color col; bool isBold; bool hasShadow; int effect; float fxSpeed; float fxIntensity; };\n";
-            cpp << "struct AudioFX { Sound snd; float start; bool played; };\n";
+            
+            // THE FIX: Added volume to the AudioFX struct
+            cpp << "struct AudioFX { Sound snd; float start; bool played; float volume; };\n";
             cpp << "struct GameZone { float start; float end; };\n";
             cpp << "\n";
             
@@ -271,11 +270,19 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "            std::stringstream ss(line.substr(5)); std::string tok; GameZone z;\n";
             cpp << "            try { std::getline(ss, tok, ','); z.start = std::stof(tok); std::getline(ss, tok, ','); z.end = std::stof(tok); zones.push_back(z); } catch(...) {}\n";
             cpp << "        }\n";
+
+            // -----------------------------------------------------------------
+            // THE AUDIO FIX: Read volume, assign it, and inject SetSoundVolume!
+            // -----------------------------------------------------------------
             cpp << "        else if(line.find(\"Audio=\") == 0) {\n";
             cpp << "            std::stringstream ss(line.substr(6)); std::string tok;\n";
             cpp << "            AudioFX afx; std::getline(ss, tok, ','); afx.snd = LoadSound(tok.c_str());\n";
-            cpp << "            try { std::getline(ss, tok, ','); afx.start = std::stof(tok); afx.played = false; audioTracks.push_back(afx); } catch(...) {}\n";
+            cpp << "            try { std::getline(ss, tok, ','); afx.start = std::stof(tok);\n";
+            cpp << "                  if (std::getline(ss, tok, ',')) { afx.volume = std::stof(tok); } else { afx.volume = 1.0f; }\n";
+            cpp << "                  SetSoundVolume(afx.snd, afx.volume);\n"; 
+            cpp << "                  afx.played = false; audioTracks.push_back(afx); } catch(...) {}\n";
             cpp << "        }\n";
+
             cpp << "        else if(line.find(\"Text=\") == 0) {\n";
             cpp << "            std::stringstream ss(line.substr(5)); std::string tok; TextFX txt;\n";
             cpp << "            try {\n";
@@ -297,15 +304,12 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "        else if(currentTrack != nullptr && line.find(\"StartSec=\") == 0) {\n";
             cpp << "            currentTrack->startSec = std::stof(line.substr(9));\n";
             cpp << "        }\n";
-            
-            // THE FIX: Parse the new Cut bounds!
             cpp << "        else if(currentTrack != nullptr && line.find(\"EndSec=\") == 0) {\n";
             cpp << "            currentTrack->endSec = std::stof(line.substr(7));\n";
             cpp << "        }\n";
             cpp << "        else if(currentTrack != nullptr && line.find(\"TrimStart=\") == 0) {\n";
             cpp << "            currentTrack->trimStart = std::stof(line.substr(10));\n";
             cpp << "        }\n";
-
             cpp << "        else if(currentTrack != nullptr && line.find(\"PlaybackSpeed=\") == 0) {\n";
             cpp << "            currentTrack->playbackSpeed = std::stof(line.substr(14));\n";
             cpp << "        }\n";
@@ -344,11 +348,8 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "        bool cameraOverride = false;\n";
             cpp << "        for (auto& ct : camTracks) {\n";
             cpp << "            if (ct.waypoints.empty()) continue;\n";
-            
-            // THE FIX: Safely bind the playback bounds to the timeline cuts!
             cpp << "            if (currentTime >= ct.startSec && currentTime <= ct.endSec) {\n";
             cpp << "                float localTime = (currentTime - ct.startSec) + ct.trimStart;\n";
-            
             cpp << "                float currentRealTime = 0.0f;\n";
             cpp << "                bool trackActive = false;\n";
             cpp << "                for (size_t i = 0; i < ct.waypoints.size(); i++) {\n";
@@ -367,7 +368,7 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "                        int i2 = (int)i;\n";
             cpp << "                        int i3 = ((int)i + 1 > n - 1) ? n - 1 : (int)i + 1;\n";
             cpp << "                        camera.position = CatmullRom(ct.waypoints[i0].pos, ct.waypoints[i1].pos, ct.waypoints[i2].pos, ct.waypoints[i3].pos, easeT);\n";
-            cpp << "                        camera.target = CatmullRom(ct.waypoints[i0].target,   ct.waypoints[i1].target,   ct.waypoints[i2].target,   ct.waypoints[i3].target,   easeT);\n";
+            cpp << "                        camera.target = CatmullRom(ct.waypoints[i0].target, ct.waypoints[i1].target, ct.waypoints[i2].target, ct.waypoints[i3].target, easeT);\n";
             cpp << "                        camera.fovy = ct.waypoints[i1].fov + (ct.waypoints[i2].fov - ct.waypoints[i1].fov) * easeT;\n";
             cpp << "                        break;\n";
             cpp << "                    }\n";
@@ -386,6 +387,7 @@ void NexusPublisher::Publish(NexusCameraTrack& camTrack, const std::vector<Scene
             cpp << "                }\n";
             cpp << "            }\n";
             cpp << "        }\n";
+            cpp << "        \n";
             
             cpp << "        bool inZone = zones.empty() ? true : false;\n";
             cpp << "        for (auto& z : zones) { if (currentTime >= z.start && currentTime <= z.end) inZone = true; }\n";

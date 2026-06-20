@@ -31,12 +31,10 @@ void NexusSceneManager::Draw(bool& isOpen,
                               bool& playerInitialized) {
     if (!isOpen) return;
 
-    // THE FIX: Force the window to spawn safely on-screen and bypass corrupted INI caches
     ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_Appearing); 
     ImGui::SetNextWindowSize(ImVec2(350, 500), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(260,200), ImVec2(800,1000));
     
-    // Changing the window title busts the ImGui cache so it forgets the broken layout!
     if (!ImGui::Begin("Scene Hierarchy", &isOpen)) {
         ImGui::End();
         return;
@@ -67,7 +65,6 @@ void NexusSceneManager::Draw(bool& isOpen,
             std::string lbl=(!timeline.tracks.empty()&&i<(int)timeline.tracks.size())
                 ?timeline.tracks[i].assetName:(scene[i].name.empty()?"Object "+std::to_string(i):scene[i].name);
             
-            // Dynamic width protection
             float availW = ImGui::GetContentRegionAvail().x;
             float btnW = std::max(10.0f, availW - 36.0f);
             
@@ -110,7 +107,6 @@ void NexusSceneManager::Draw(bool& isOpen,
             ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "[TEXT]");
             ImGui::SameLine();
             
-            // Dynamic width protection
             float availW = ImGui::GetContentRegionAvail().x;
             float btnW = std::max(10.0f, availW - 36.0f);
             
@@ -132,6 +128,48 @@ void NexusSceneManager::Draw(bool& isOpen,
         timeline.textTracks.erase(timeline.textTracks.begin() + textDelIdx);
         if (selectedTextIndex == textDelIdx) selectedTextIndex = -1;
         else if (selectedTextIndex > textDelIdx) selectedTextIndex--;
+    }
+
+    ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+    // ---------------------------------------------------------------
+    // CINEMATIC AUDIO TRACKS (NEW)
+    // ---------------------------------------------------------------
+    ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.7f, 1.0f), "Cinematic Audio Tracks");
+    ImGui::TextDisabled("%d track(s)", (int)timeline.audioManager.tracks.size());
+    ImGui::Spacing();
+
+    int audioDelIdx = -1;
+    if (timeline.audioManager.tracks.empty()) {
+        ImGui::TextDisabled("No audio tracks placed yet.");
+    } else {
+        for (int i=0; i < (int)timeline.audioManager.tracks.size(); i++) {
+            ImGui::PushID(20000 + i);
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.8f, 1.0f), "[AUDIO]");
+            ImGui::SameLine();
+            ImGui::Text("%s", timeline.audioManager.tracks[i].assetName.c_str());
+            
+            float availW = ImGui::GetContentRegionAvail().x;
+            float btnW = std::max(10.0f, availW - 36.0f);
+            
+            ImGui::SetNextItemWidth(btnW - 10.0f);
+            if (ImGui::SliderFloat("##vol", &timeline.audioManager.tracks[i].volume, 0.0f, 1.0f, "Vol: %.2f")) {
+                // Instantly update the music volume stream!
+                SetMusicVolume(timeline.audioManager.tracks[i].stream, timeline.audioManager.tracks[i].volume);
+            }
+            
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.6f,.1f,.1f,1.f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(.9f,.2f,.2f,1.f));
+            if (ImGui::SmallButton(" X ")) audioDelIdx=i;
+            ImGui::PopStyleColor(2);
+            ImGui::Separator();
+            ImGui::PopID();
+        }
+    }
+    
+    if (audioDelIdx >= 0) {
+        timeline.audioManager.RemoveTrack(audioDelIdx);
     }
 
     ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();

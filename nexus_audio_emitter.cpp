@@ -19,6 +19,7 @@ void CharacterAudioComponent::AddLine(const std::string& path) {
     AudioDialogLine line;
     line.filePath = path;
     line.sound = LoadSound(path.c_str());
+    line.volume = 1.0f; // Initialize volume
     if (line.sound.frameCount > 0) {
         line.isLoaded = true;
         playlist.push_back(line);
@@ -41,9 +42,7 @@ void CharacterAudioComponent::Update(Vector3 playerPos, Vector3 myPos, float dt)
         return;
     }
 
-    if (currentCooldown > 0.0f) {
-        currentCooldown -= dt;
-    }
+    if (currentCooldown > 0.0f) currentCooldown -= dt;
 
     if (currentlyPlayingIndex != -1) {
         if (!IsSoundPlaying(playlist[currentlyPlayingIndex].sound)) {
@@ -52,8 +51,6 @@ void CharacterAudioComponent::Update(Vector3 playerPos, Vector3 myPos, float dt)
     }
 
     float dist = Vector3Distance(playerPos, myPos);
-    
-    // Sets the flag so the screen knows to draw the text prompt
     playerIsInRange = (dist <= triggerRadius);
 
     if (playerIsInRange && currentCooldown <= 0.0f && currentlyPlayingIndex == -1) {
@@ -63,10 +60,7 @@ void CharacterAudioComponent::Update(Vector3 playerPos, Vector3 myPos, float dt)
             shouldPlay = true;
         } 
         else if (triggerType == AudioTriggerType::INTERACT) {
-            // Checks the specific key the user chose in the inspector
-            if (IsKeyPressed(interactKey)) {
-                shouldPlay = true;
-            }
+            if (IsKeyPressed(interactKey)) shouldPlay = true;
         }
 
         if (shouldPlay) {
@@ -78,7 +72,10 @@ void CharacterAudioComponent::Update(Vector3 playerPos, Vector3 myPos, float dt)
                 playIndex = GetRandomValue(0, (int)playlist.size() - 1);
             }
 
+            // THE FIX: Set the volume right before playing the clip!
+            SetSoundVolume(playlist[playIndex].sound, playlist[playIndex].volume);
             PlaySound(playlist[playIndex].sound);
+            
             currentlyPlayingIndex = playIndex;
             currentCooldown = cooldownTime;
         }
@@ -87,22 +84,19 @@ void CharacterAudioComponent::Update(Vector3 playerPos, Vector3 myPos, float dt)
 
 void CharacterAudioComponent::DrawDebugZone(Vector3 myPos) {
     if (!playlist.empty()) {
-        // Draws a green ring flat on the ground so you can visualize the proximity
         DrawCircle3D(myPos, triggerRadius, {1.0f, 0.0f, 0.0f}, 90.0f, Fade(GREEN, 0.2f));
-        DrawCircle3D(myPos, triggerRadius, {1.0f, 0.0f, 0.0f}, 90.0f, Fade(DARKGREEN, 0.8f)); // Wireframe edge illusion
+        DrawCircle3D(myPos, triggerRadius, {1.0f, 0.0f, 0.0f}, 90.0f, Fade(DARKGREEN, 0.8f)); 
     }
 }
 
 void CharacterAudioComponent::DrawGameplayPrompt(int screenWidth, int screenHeight) {
-    // Only show "Press X to Interact" if they are in the zone, audio is set to interact, and not cooling down
     if (playerIsInRange && triggerType == AudioTriggerType::INTERACT && currentlyPlayingIndex == -1 && currentCooldown <= 0.0f) {
         std::string prompt = "Press " + GetKeyName() + " to Interact";
         int textWidth = MeasureText(prompt.c_str(), 30);
-        
         int posX = (screenWidth / 2) - (textWidth / 2);
         int posY = screenHeight - 150;
 
-        DrawText(prompt.c_str(), posX + 2, posY + 2, 30, BLACK); // Drop shadow
+        DrawText(prompt.c_str(), posX + 2, posY + 2, 30, BLACK); 
         DrawText(prompt.c_str(), posX, posY, 30, RAYWHITE);
     }
 }
@@ -122,7 +116,6 @@ void CharacterAudioComponent::DrawUI() {
     ImGui::RadioButton("Interact", &trigger, 1);
     triggerType = (AudioTriggerType)trigger;
 
-    // Custom Key Selector
     if (triggerType == AudioTriggerType::INTERACT) {
         const char* keys[] = { "E", "F", "R", "Q", "SPACE", "ENTER" };
         const int keyCodes[] = { KEY_E, KEY_F, KEY_R, KEY_Q, KEY_SPACE, KEY_ENTER };
@@ -155,10 +148,16 @@ void CharacterAudioComponent::DrawUI() {
         std::string name = playlist[i].filePath.substr(playlist[i].filePath.find_last_of("/\\") + 1);
         ImGui::Text("%s", name.c_str());
         
+        // THE FIX: Volume Slider added directly to the Inspector Panel!
+        if (ImGui::SliderFloat("Volume", &playlist[i].volume, 0.0f, 1.0f, "Vol: %.2f")) {
+            SetSoundVolume(playlist[i].sound, playlist[i].volume); // Test volume immediately
+        }
+        
         ImGui::SameLine(ImGui::GetWindowWidth() - 40);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.2f, 0.2f, 1));
         if (ImGui::Button("X")) toDelete = (int)i;
         ImGui::PopStyleColor();
+        ImGui::Separator();
         ImGui::PopID();
     }
     if (toDelete != -1) RemoveLine(toDelete);

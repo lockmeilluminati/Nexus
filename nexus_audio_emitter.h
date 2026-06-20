@@ -11,6 +11,9 @@ struct AudioDialogLine {
     std::string filePath;
     Sound sound;
     bool isLoaded = false;
+    
+    // THE FIX: New Volume Variable
+    float volume = 1.0f; 
 };
 
 struct CharacterAudioComponent {
@@ -36,8 +39,8 @@ struct CharacterAudioComponent {
     
     // UI & Rendering
     void DrawUI(); 
-    void DrawDebugZone(Vector3 myPos); // Draws the green ring in editor
-    void DrawGameplayPrompt(int screenWidth, int screenHeight); // Draws "Press E" on screen
+    void DrawDebugZone(Vector3 myPos); 
+    void DrawGameplayPrompt(int screenWidth, int screenHeight); 
     
     void UnloadAll();
     std::string GetKeyName() const;

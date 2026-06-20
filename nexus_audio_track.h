@@ -10,8 +10,11 @@ struct TimelineAudioTrack {
     int startFrame = 0;
     int durationFrames = 0;
     
-    // NEW: Records how much of the intro has been shaved off
+    // Records how much of the intro has been shaved off
     float trimStartSecs = 0.0f; 
+    
+    // THE FIX: New Volume Variable
+    float volume = 1.0f; 
     
     Music stream;
     bool isLoaded = false;
